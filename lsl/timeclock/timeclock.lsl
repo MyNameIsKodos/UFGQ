@@ -1,6 +1,6 @@
 /*
 timeclock.lsl
-Program designed to function as a timeclock to allow for Aatars on SL/OSG to clock into and out of UFGQ
+Program designed to function as a timeclock to allow for avatars on SL/OSG to clock into and out of UFGQ
     Copyright (C) 2016  Andrew Malone
 
     This program is free software: you can redistribute it and/or modify
@@ -17,8 +17,13 @@ Program designed to function as a timeclock to allow for Aatars on SL/OSG to clo
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-// User configurable varialbes.
+// User configurable variables.
 vector LogoScale = <1.05, 1.05, 0>; //Scale is only an X/Y value
+integer _SOUND_INTERNAL = TRUE; // SOUND API TRUE for local prim sound FALSE for remote sound device
+list _SOUND_BUTTON_ = ["08ca2c4b-75eb-6056-276e-7cfde6d3a9b3","4429e529-63b4-ffc6-cbff-220722065c8c","05f95eed-e222-d17e-22c6-f4c901de120d","4460c043-ae2f-709e-1bb1-b743a149225c","f48e3570-98d7-d634-baa2-e479943755f6","1a3f0d6e-e688-cef5-935d-846f8f386a8f","09deeff1-5c8e-a627-01ac-1efcf8c41acc","88bcad6c-4cb5-e8e6-a48d-97724e6de614"];
+key ERROR_SOUND = ""; // Error sound
+key StandByLogo = "ef9fc11a-fc5e-bef6-2934-88ea97529ff8"; // Defualt texture when in standby mode
+string CLOCK_PAGE = "http://ci-main.no-ip.org/clock.php";
 
 
 // Variable Init
@@ -27,24 +32,73 @@ string profile_key_prefix = "<meta name=\"imageid\" content=\"";
 key USER = "";
 key ClockReq = ""; // Clock request HTTP Key
 integer PROFILE_FACE = 1; // Profile display face
-key StandByLogo = "ef9fc11a-fc5e-bef6-2934-88ea97529ff8"; // Defualt texture when in standby mode
 integer LIGHT_FACE = 2; // Light Face
 integer CONSOLE_FACE = 3;// Console Face
 list StandbyParams = [PRIM_TEXTURE, PROFILE_FACE, StandByLogo, LogoScale, <0,0,0>, 0.0];
+integer SOUND_API = -26;
+string HTTP_ERROR = "An unexpected error occured while attempting to clock user in/out. Please visit https://github.com/CollectiveIndustries/UFGQ/issues to submit bug reports or checkup on known issues.\n\n";
 
-// Function declerations
+// Function declarations
 
+/*
+	NAME:	 void GetProfilePic(key)
+	PURPOSE: Grabs Profile information for the Avatar with provided key
+	USAGE:	 http_response event will be called after the Request goes through
+	RETURN:	 Function has no direct value, all information is returned using the http_response event
+	AUTHOR:  Unknown
+        LICENCE: GNU GPL V3
+*/
 key ProfilePicReq = "";
 GetProfilePic(key id) //Run the HTTP Request then set the texture
 {
-    string URL_RESIDENT = "http://world.secondlife.com/resident/";
-    ProfilePicReq = llHTTPRequest( URL_RESIDENT + (string)id,[HTTP_METHOD,"GET"],"");
+	string URL_RESIDENT = "http://world.secondlife.com/resident/";
+	ProfilePicReq = llHTTPRequest( URL_RESIDENT + (string)id,[HTTP_METHOD,"GET"],"");
+}
+
+/*
+        NAME:    void _CISoundServ(integer, string, integer)
+        PURPOSE: Playes sounds provided by the UUID string locally if internal = TRUE otherwise send UUID to remote sound system on channel
+        USAGE:   Using the remote sound system a string in the form "sound:UUID" will be sent on the channel this will need to be parsed and then played remotly.
+	RETURN:	 No Direct returns
+	AUTHOR:  AdmiralMorketh Sorex (c) 2014
+        LICENCE: GNU GPL V3
+*/
+
+_CISoundServ(integer chan, string UUID, integer internal)
+{
+	//llSay(0,"DEBUG SOUND API: "+(string)chan+" UUID: "+(string)UUID+" INTERNAL "+(string)internal);
+	if (internal == TRUE)
+	{
+		llPlaySound(UUID,1.0);
+	}
+	else if(internal == FALSE)
+	{
+		llRegionSay(chan,"sound:"+UUID);
+	}
+}
+
+/*
+        NAME:    void playRandomSound(list)
+        PURPOSE: Randomly selects a sound from "list" and calls the SoundServer
+        USAGE:   Pass as many sound UUIDs to this function to have then randomly selected and played
+        RETURN:  No Direct returns
+	AUTHOR:	 AdmiralMorketh Sorex (c) 2014
+	LICENCE: GNU GPL V3
+*/
+
+
+playRandomSound(list UUIDS)
+{
+	integer listlen = llGetListLength(UUIDS);
+
+	integer index = (integer)llFrand(listlen);
+	_CISoundServ(SOUND_API, llList2String(UUIDS,index) ,_SOUND_INTERNAL);
+	//llSound(llList2String(UUIDS,index), 1.0,TRUE,FALSE);
+	llSleep(0.1);
 }
 
 
-//   Faces Selection   ///
-
-
+// Main entry Point //
 default
 {
 	state_entry()
@@ -56,6 +110,7 @@ default
 
 	http_response(key req ,integer stat, list met, string body)
 	{
+		//llSay(0,"REQ: "+(string)req+"\nSTAT: "+(string)stat);
 		if(req == ProfilePicReq) //response is from the Profile picture request
 		{
 			integer s1 = llSubStringIndex(body,profile_key_prefix);
@@ -81,7 +136,21 @@ default
 		}
 		else if( req == ClockReq ) //Response was from the TimeClock
 		{
-			llSay(0,"Time clock server reports:\n"+body);
+			if(stat == 200)
+			{
+				//Set up if statment to handle server Errors here
+				if(llToLower(llGetSubString(body, 0, 5)) == "error:")
+				{
+					llSay(0,HTTP_ERROR+"\nSTAT: "+(string)stat+"\nRES: "+(string)body);
+				}
+				else
+				{
+					llInstantMessage(USER,"You have been clocked into UFGQ. Please remmeber to clock out at the end of your shift. If for any reason you are offline for more then 5 minutes the system will automatically clock you out.");
+				}
+				USER = "";
+			}
+			else
+				llSay(0,HTTP_ERROR+"\nSTAT: "+(string)stat+"\nRES: "+(string)body);
 		}
 	}
 
@@ -91,15 +160,14 @@ default
 		integer face = llDetectedTouchFace(0);
  
 		if (face == TOUCH_INVALID_FACE)
-			llSay(0, "Sorry, your viewer doesn't support touched faces.");
+			llInstantMessage(USER, "Sorry, your viewer doesn't support touched faces. In order to clock in you may need to upgrade your browser or contact your Department head to keep track of your hours.");
 		else if(face == CONSOLE_FACE ) // Not invalid Log user in IF they touched the proper face
 		{
+			playRandomSound(_SOUND_BUTTON_);
 			USER = llDetectedKey(0);
 			GetProfilePic(USER);
-			llInstantMessage(USER,"System is processing your request. Another IM will be sent once the system has registered you clocking in/out.");
-			// Set up PHP post here for Database time log
-			ClockReq = llHTTPRequest(CLOCK_PAGE, [HTTP_METHOD, "POST", HTTP_MIMETYPE, "application/x-www-form-urlencoded"], "uuid="+(string)USER);
-			USER = "";
+			llInstantMessage(USER,"System is processing your request. Another IM will be sent once the system has registered the clock update.");
+			ClockReq = llHTTPRequest(CLOCK_PAGE, [HTTP_METHOD, "POST", HTTP_MIMETYPE, "application/x-www-form-urlencoded"], "uuid="+(string)USER+"&name="+llKey2Name(USER));
 		}
 	}
 }
